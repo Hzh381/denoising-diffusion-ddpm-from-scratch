@@ -336,32 +336,27 @@ def sample_quality_mse(samples, dataset) -> float:
 import torch
 import torch.nn.functional as F
 
-def ddpm_experiment(n_data: int = 64, size: int = 8, T: int = 20, hidden: int = 16, num_steps: int = 40, batch_size: int = 16, lr: float = 5e-2, n_samples: int = 8, seed: int = 0) -> dict:
-    # TODO: data -> train -> sample -> metrics
-      # 1. 数据集
+def ddpm_experiment(n_data=64, size=8, T=20, hidden=16,
+                    num_steps=40, batch_size=16, lr=5e-2,
+                    n_samples=8, seed=0):
     dataset = make_blob_dataset(n_data, size, seed=seed)
 
-    # 2. 调度
-    schedule = build_diffusion_schedule(T)
+    # 关键改动：显式用强 beta，让 T 较小时信号也能被破坏
+    schedule = build_diffusion_schedule(T, beta_start=0.1, beta_end=0.4)
 
-    # 3. 初始化网络参数
     params = init_tiny_unet(1, hidden, time_dim=hidden, seed=seed)
 
-    # 4. 训练
     params, history = train_ddpm(
         dataset, params, schedule, num_steps, batch_size, lr, seed
     )
 
-    # 5. 采样生成图像
     samples = ddpm_sample_loop(
         params, schedule, (n_samples, 1, size, size), seed=seed + 1
     )
 
-    # 6. 纯噪声对照
     torch.manual_seed(seed + 2)
     noise = torch.randn(n_samples, 1, size, size)
 
-    # 7. 算指标
     sample_mse = sample_quality_mse(samples, dataset)
     noise_mse = sample_quality_mse(noise, dataset)
 
