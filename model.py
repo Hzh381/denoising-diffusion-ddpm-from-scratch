@@ -301,6 +301,7 @@ def ddpm_sample_loop(params: dict, schedule: dict, shape: tuple, seed: int = 0):
     for t in reversed(range(T)):
         t_batch=torch.full((B,),t)
         x=ddpm_p_sample(x,t_batch,params,schedule)
+    return x
     pass
 
 # Step 19 - sample_quality_mse (not yet solved)
