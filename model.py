@@ -255,22 +255,33 @@ def predict_x0_from_eps(x_t, t, eps, alphas_cumprod):
 import torch
 import torch.nn.functional as F
 
-def ddpm_p_mean_variance(x_t, t, eps, schedule: dict):
-    # TODO: return (posterior_mean, variance, x0_hat)
-    #alphas_cumprod=extract_into_batch(,t,x_t)
+import torch
 
-    x0_hat=predict_x0_from_eps(x_t,t,eps,schedule['alphas_cumprod'])
+def ddpm_p_mean_variance(x_t, t, eps, schedule: dict):
+    alphas         = schedule['alphas']
+    alphas_cumprod = schedule['alphas_cumprod']
+    betas          = schedule['betas']
+
+    # 预先补 1，处理 t=0
+    alphas_cumprod_prev = torch.cat([
+        torch.ones(1, device=alphas_cumprod.device, dtype=alphas_cumprod.dtype),
+        alphas_cumprod[:-1]
+    ], dim=0)
+
+    alpha_bar_t    = extract_into_batch(alphas_cumprod,      t, x_t)
+    alpha_bar_prev = extract_into_batch(alphas_cumprod_prev, t, x_t)
+    beta_t         = extract_into_batch(betas,               t, x_t)
+    alpha_t        = extract_into_batch(alphas,              t, x_t)
+
+    x0_hat = predict_x0_from_eps(x_t, t, eps, alphas_cumprod)
     x0_hat = x0_hat.clamp(-1.0, 1.0)
-    beta=extract_into_batch(schedule['betas'],t,x_t)
-    alphas_t=extract_into_batch(schedule['alphas'],t,x_t)
-    sqrt_alphas_cumprod_t_1=extract_into_batch(schedule['sqrt_alphas_cumprod'],t-1,x_t)
-    sqrt_one_minus_alphas_cumprod_t=extract_into_batch(schedule['sqrt_one_minus_alphas_cumprod'],t,x_t)
-    sqrt_one_minus_alphas_cumprod_t_1=extract_into_batch(schedule['sqrt_one_minus_alphas_cumprod'],t-1,x_t)
-    u=(x_t*torch.sqrt(alphas_t)*sqrt_one_minus_alphas_cumprod_t_1**2+sqrt_alphas_cumprod_t_1*x0_hat*beta)/sqrt_one_minus_alphas_cumprod_t**2
-    var=beta
-    
-    return u,var,x0_hat
-    pass
+
+    one_minus = 1.0 - alpha_bar_t
+    coef_x0 = torch.sqrt(alpha_bar_prev) * beta_t / one_minus
+    coef_xt = torch.sqrt(alpha_t) * (1.0 - alpha_bar_prev) / one_minus
+
+    mean = coef_x0 * x0_hat + coef_xt * x_t
+    return mean, beta_t, x0_hat
 
 # Step 17 - ddpm_p_sample
 import torch
@@ -321,6 +332,44 @@ def sample_quality_mse(samples, dataset) -> float:
     return float(torch.stack(min_mses).mean())
     pass
 
-# Step 20 - ddpm_experiment (not yet solved)
-# TODO: implement
+# Step 20 - ddpm_experiment
+import torch
+import torch.nn.functional as F
+
+def ddpm_experiment(n_data: int = 64, size: int = 8, T: int = 20, hidden: int = 16, num_steps: int = 40, batch_size: int = 16, lr: float = 5e-2, n_samples: int = 8, seed: int = 0) -> dict:
+    # TODO: data -> train -> sample -> metrics
+      # 1. 数据集
+    dataset = make_blob_dataset(n_data, size, seed=seed)
+
+    # 2. 调度
+    schedule = build_diffusion_schedule(T)
+
+    # 3. 初始化网络参数
+    params = init_tiny_unet(1, hidden, time_dim=hidden, seed=seed)
+
+    # 4. 训练
+    params, history = train_ddpm(
+        dataset, params, schedule, num_steps, batch_size, lr, seed
+    )
+
+    # 5. 采样生成图像
+    samples = ddpm_sample_loop(
+        params, schedule, (n_samples, 1, size, size), seed=seed + 1
+    )
+
+    # 6. 纯噪声对照
+    torch.manual_seed(seed + 2)
+    noise = torch.randn(n_samples, 1, size, size)
+
+    # 7. 算指标
+    sample_mse = sample_quality_mse(samples, dataset)
+    noise_mse = sample_quality_mse(noise, dataset)
+
+    return {
+        'train_losses': history,
+        'final_loss': float(history[-1]),
+        'sample_mse': float(sample_mse),
+        'noise_mse': float(noise_mse),
+        'improvement': float(noise_mse - sample_mse),
+    }
 
