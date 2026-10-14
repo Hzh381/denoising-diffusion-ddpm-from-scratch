@@ -222,8 +222,24 @@ def ddpm_train_step(params: dict, x0, schedule: dict, lr: float = 1e-2, seed: in
     
     pass
 
-# Step 14 - train_ddpm (not yet solved)
-# TODO: implement
+# Step 14 - train_ddpm
+import torch
+import torch.nn.functional as F
+
+def train_ddpm(dataset, params: dict, schedule: dict, num_steps: int = 50, batch_size: int = 16, lr: float = 1e-2, seed: int = 0) -> tuple[dict, list]:
+    # TODO: minibatch SGD training loop
+    
+    history=[]
+    for i in range(num_steps):
+        torch.manual_seed(seed+i)
+        indice=torch.randint(0,len(dataset),(batch_size,))
+        batch=dataset[indice]
+        params,l=ddpm_train_step(params,batch,schedule,lr,seed)
+    
+        history.append(l)
+    return params,history
+    
+    pass
 
 # Step 15 - predict_x0_from_eps (not yet solved)
 # TODO: implement
